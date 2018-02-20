@@ -1,0 +1,119 @@
+version: '2'
+
+services:
+    reverse-proxy:
+        # 依存関係のあるサービス
+        depends_on:
+            - main-app
+            - sub-app
+        # 構築に参照するDockerfileの参照先を指定
+        build: "./build/reverse-proxy"
+        # 作成したコンテナ名を指定 ※名前を固定化すると複数のサービスの立ち上げができなくなってしまう
+        container_name: "rproxy"
+        cpu_shares: 1024
+        ports:
+            - "80:80"
+            - "443:443"
+        # ボリュームの紐付け設定
+        volumes:
+            - "./volumes/reverse-proxy/nginx_logs:/var/log/nginx"
+        networks:
+            front:
+                ipv4_address: 172.19.0.254
+        # 他コンテナのサービスとリンク ※エイリアスで参照が可能になる
+        links:
+            - main-app
+            - sub-app
+        restart: always
+        # 疑似ターミナル（プロセスが終了していてもコマンド待機状態になるので、コンテナが起動したままになる）
+        tty: true
+    main-app:
+        depends_on:
+            - main-db
+        build: "./build/main-app"
+        container_name: "main-app"
+        cpu_shares: 1024
+        volumes:
+            - "./volumes/main-app/data:/data"
+            - "./volumes/main-app/html:/var/www/html"
+            - "./volumes/main-app/logs:/var/log/httpd"
+        networks:
+            - front
+            - back
+        links:
+            - main-db
+        restart: always
+        tty: true
+        privileged: true
+        command: /sbin/init
+    sub-app:
+        depends_on:
+            - sub-db
+        build: "./build/sub-app"
+        container_name: "sub-app"
+        cpu_shares: 1024
+        volumes:
+            - "./volumes/sub-app/html:/var/www/html"
+            - "./volumes/sub-app/logs:/var/logs/httpd"
+        networks:
+            - front
+            - back
+        links:
+            - sub-db
+        restart: always
+        tty: true
+        privileged: true
+        command: /sbin/init
+    main-db:
+        # imageは既存のイメージを使用する際に仕様する
+        image: mysql:latest
+        container_name: "main-db"
+        cpu_shares: 256
+        command: mysqld --sql_mode=""
+        environment:
+            MYSQL_ROOT_PASSWORD: root
+            MYSQL_DATABASE: main_db
+            MYSQL_USER: main_db
+            MYSQL_PASSWORD: main_db
+            tz: "Asia/Tokyo"
+        volumes:
+            - "./volumes/main-db/inits:/docker-entrypoint-initdb.d"
+            - "./volumes/main-db/mysql:/var/lib/mysql"
+            - "./volumes/main-db/conf.d:/etc/mysql/conf.d"
+        networks:
+            - back
+        restart: always
+    sub-db:
+        image: mysql:latest
+        container_name: "sub-db"
+        cpu_shares: 256
+        command: mysqld --sql_mode=""
+        environment:
+            MYSQL_ROOT_PASSWORD: root
+            MYSQL_DATABASE: sub_db
+            MYSQL_USER: sub_db
+            MYSQL_PASSWORD: sub_db
+            tz: "Asia/Tokyo"
+        volumes:
+            - "./volumes/sub-db/inits:/docker-entrypoint-initdb.d"
+            - "./volumes/sub-db/mysql:/var/lib/mysql"
+            - "./volumes/sub-db/conf.d:/etc/mysql/conf.d"
+        networks:
+            - back
+        restart: always
+
+networks:
+    front:
+        driver: bridge
+        ipam:
+            driver: default
+            config:
+                - subnet: "172.19.0.0/24"
+                  gateway: "172.19.0.1"
+    back:
+        driver: bridge
+        ipam:
+            driver: default
+            config:
+                - subnet: "172.19.1.0/24"
+                  gateway: "172.19.1.1"
